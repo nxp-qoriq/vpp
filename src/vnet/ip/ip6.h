@@ -611,7 +611,8 @@ vlib_buffer_push_ip6 (vlib_main_t * vm, vlib_buffer_t * b,
 
 }
 
-always_inline u32
+//always_inline u32
+inline u32
 vlib_buffer_get_ip6_fib_index (vlib_buffer_t * b)
 {
   u32 fib_index, sw_if_index;
