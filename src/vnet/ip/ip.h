@@ -278,8 +278,8 @@ u8 ip_is_local (u32 fib_index, ip46_address_t * ip46_address, u8 is_ip4);
 void ip_copy (ip46_address_t * dst, ip46_address_t * src, u8 is_ip4);
 void ip_set (ip46_address_t * dst, void *src, u8 is_ip4);
 
-inline u32 vlib_buffer_get_ip4_fib_index (vlib_buffer_t * b);
-inline u32 vlib_buffer_get_ip6_fib_index (vlib_buffer_t * b);
+always_inline u32 vlib_buffer_get_ip4_fib_index (vlib_buffer_t * b);
+always_inline u32 vlib_buffer_get_ip6_fib_index (vlib_buffer_t * b);
 always_inline u32
 vlib_buffer_get_ip_fib_index (vlib_buffer_t * b, u8 is_ip4)
 {
