@@ -312,12 +312,12 @@ dpdk_crypto_input_inline (vlib_main_t * vm, vlib_node_runtime_t * node,
   vec_foreach (res_idx, cwm->resource_idx)
     {
       res = vec_elt_at_index (dcm->resource, res_idx[0]);
+
+	while (res->inflights[0] > 0 || res->inflights[1] > 0) {
+		n_deq += dpdk_crypto_dequeue (vm, cwm, node, res);
+	}
+
       u32 inflights = res->inflights[0] + res->inflights[1];
-
-      if (inflights)
-	n_deq += dpdk_crypto_dequeue (vm, cwm, node, res);
-
-      inflights = res->inflights[0] + res->inflights[1];
       if (PREDICT_FALSE (res->remove && !(inflights)))
 	vec_add1 (remove, res_idx[0]);
     }
