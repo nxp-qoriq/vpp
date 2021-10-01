@@ -747,7 +747,6 @@ crypto_dev_conf (u8 dev, u16 n_qp, u8 numa)
 static void
 crypto_scan_devs (u32 n_mains)
 {
-  dpdk_config_main_t *conf = &dpdk_config_main;
   dpdk_crypto_main_t *dcm = &dpdk_crypto_main;
   struct rte_cryptodev *cryptodev;
   struct rte_cryptodev_info info = { 0 };
@@ -785,12 +784,11 @@ crypto_scan_devs (u32 n_mains)
 	continue;
 
       /* Enable Crypto Protocol Offload only if driver supports that */
-      if (conf->en_lookaside_proto_offload &&
-       (info.feature_flags & RTE_CRYPTODEV_FF_SECURITY))
-               dcm->lookaside_proto_offload = 1;
+      if (info.feature_flags & RTE_CRYPTODEV_FF_SECURITY)
+	dcm->lookaside_proto_offload = 1;
 
-      printf("IPSec Protocol offload %s for dev %s\n",
-                       dcm->lookaside_proto_offload ? "Enabled" : "Disabled", dev->name);
+      printf("IPSec Protocol offload capability %s for dev %s\n",
+	     dcm->lookaside_proto_offload ? "supported" : "not supported", dev->name);
 
       if ((error = crypto_dev_conf (i, dev->max_qp, dev->numa)))
 	{
