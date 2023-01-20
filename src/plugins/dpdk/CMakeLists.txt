@@ -138,6 +138,11 @@ add_vpp_plugin(dpdk
   device/format.c
   device/init.c
   device/node.c
+  ipsec/cli.c
+  ipsec/crypto_node.c
+  ipsec/esp_decrypt.c
+  ipsec/esp_encrypt.c
+  ipsec/ipsec.c
   ${DPDK_CRYPTODEV_OP_SOURCE}
   ${DPDK_CRYPTODEV_SOURCE}
   ${DPDK_CRYPTODEV_RAW_SOURCE}
@@ -146,6 +151,9 @@ add_vpp_plugin(dpdk
   buffer.c
   device/device.c
   device/node.c
+  ipsec/crypto_node.c
+  ipsec/esp_decrypt.c
+  ipsec/esp_encrypt.c
 
   INSTALL_HEADERS
   device/dpdk.h
