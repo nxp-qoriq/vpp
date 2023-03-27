@@ -321,7 +321,7 @@ crypto_set_auth_xform (struct rte_crypto_sym_xform *xform,
 }
 
 static clib_error_t *
-crypto_create_session_priv_pool (u8 numa)
+crypto_create_session_priv_pool (u8 numa, crypto_dev_t *dev)
 {
   dpdk_crypto_main_t *dcm = &dpdk_crypto_main;
   crypto_data_t *data;
@@ -335,6 +335,7 @@ crypto_create_session_priv_pool (u8 numa)
 
   pool_name = format (0, "session_priv_pool_numa%u%c", numa, 0);
 
+  session_drv_size = rte_cryptodev_sym_get_private_session_size (dev->id);
   mp_priv = rte_mempool_create ((char *) pool_name, DPDK_CRYPTO_NB_SESS_OBJS,
 			session_drv_size, 512, 0, NULL, NULL, NULL, NULL, numa, 0);
   vec_free (pool_name);
@@ -392,7 +393,7 @@ create_security_session (struct rte_crypto_sym_xform *xfs,
   mp = vec_elt_at_index (data->session_drv, res->drv_id);
   ASSERT (mp[0] != NULL);
 
-  crypto_create_session_priv_pool (res->numa);
+  crypto_create_session_priv_pool (res->numa, dcm->dev);
 
   return rte_security_session_create(ctx, &sess_conf, mp[0], data->session_priv);
 }
