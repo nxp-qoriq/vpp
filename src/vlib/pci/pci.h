@@ -48,7 +48,7 @@ typedef CLIB_PACKED (union
 {
   struct
     {
-      u16 domain;
+      u32 domain;
       u8 bus;
       u8 slot: 5;
       u8 function:3;

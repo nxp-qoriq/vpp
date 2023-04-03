@@ -206,8 +206,8 @@ dpdk_find_startup_config (struct rte_eth_dev_info *di)
   if ((vmbus_dev = dpdk_get_vmbus_device (di)))
     {
       unformat_input_t input_vmbus;
-      unformat_init_string (&input_vmbus, di->device->name,
-			    strlen (di->device->name));
+      unformat_init_string (&input_vmbus, rte_dev_name(di->device),
+			    strlen (rte_dev_name(di->device)));
       if (unformat (&input_vmbus, "%U", unformat_vlib_vmbus_addr, &vmbus_addr))
 	p = mhash_get (&dm->conf->device_config_index_by_vmbus_addr,
 		       &vmbus_addr);
@@ -990,7 +990,7 @@ dpdk_config (vlib_main_t * vm, unformat_input_t * input)
   int eal_no_hugetlb = 0;
   u8 no_pci = 0;
   u8 no_vmbus = 0;
-  u8 no_dsa = 0;
+//  u8 no_dsa = 0;
   u8 file_prefix = 0;
   u8 *socket_mem = 0;
   u8 *huge_dir_path = 0;
@@ -1101,8 +1101,8 @@ dpdk_config (vlib_main_t * vm, unformat_input_t * input)
 	  tmp = format (0, "--no-pci%c", 0);
 	  vec_add1 (conf->eal_init_args, tmp);
 	}
-      else if (unformat (input, "no-dsa"))
-	no_dsa = 1;
+//      else if (unformat (input, "no-dsa"))
+//	no_dsa = 1;
       else if (unformat (input, "blacklist %U", unformat_vlib_vmbus_addr,
 			 &vmbus_addr))
 	{
@@ -1312,6 +1312,7 @@ dpdk_config (vlib_main_t * vm, unformat_input_t * input)
 
   vm = vlib_get_main ();
 
+#if 0
   if (no_dsa)
     {
       struct rte_bus *bus;
@@ -1319,6 +1320,7 @@ dpdk_config (vlib_main_t * vm, unformat_input_t * input)
       if (bus)
 	rte_bus_unregister (bus);
     }
+#endif
   /* make copy of args as rte_eal_init tends to mess up with arg array */
   for (i = 1; i < vec_len (conf->eal_init_args); i++)
     conf->eal_init_args_str = format (conf->eal_init_args_str, "%s ",
