@@ -20,6 +20,7 @@
 #include <vnet/crypto/crypto.h>
 #undef always_inline
 #include <rte_cryptodev.h>
+#include <cryptodev_pmd.h>
 
 #define CRYPTODEV_NB_CRYPTO_OPS	   1024
 #define CRYPTODEV_CACHE_QUEUE_SIZE VNET_CRYPTO_FRAME_POOL_SIZE
@@ -84,7 +85,7 @@ typedef enum
 /* Cryptodev session data, one data per direction per numa */
 typedef struct
 {
-  struct rte_cryptodev_sym_session ***keys;
+  void ***keys;
 } cryptodev_key_t;
 
 /* Replicate DPDK rte_cryptodev_sym_capability structure with key size ranges
@@ -163,7 +164,7 @@ typedef struct
       u16 aad_index;
       u8 *aad_buf;
       u64 aad_phy_addr;
-      struct rte_cryptodev_sym_session *reset_sess;
+      void *reset_sess;
     };
   };
   u16 cryptodev_id;

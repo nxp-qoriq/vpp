@@ -292,7 +292,7 @@ cryptodev_raw_aead_enqueue (vlib_main_t *vm, vnet_crypto_async_frame_t *frame,
 	    }
 
 	  if (PREDICT_FALSE (
-		(u8) key->keys[vm->numa_node][op_type]->opaque_data !=
+		rte_cryptodev_sym_session_opaque_data_get(key->keys[vm->numa_node][op_type]) !=
 		aad_len))
 	    {
 	      cryptodev_sess_handler (vm, VNET_CRYPTO_KEY_OP_DEL,
