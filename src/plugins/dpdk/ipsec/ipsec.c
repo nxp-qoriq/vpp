@@ -320,34 +320,6 @@ crypto_set_auth_xform (struct rte_crypto_sym_xform *xform,
     xform->auth.op = RTE_CRYPTO_AUTH_OP_VERIFY;
 }
 
-static clib_error_t *
-crypto_create_session_priv_pool (u8 numa, crypto_dev_t *dev)
-{
-  dpdk_crypto_main_t *dcm = &dpdk_crypto_main;
-  crypto_data_t *data;
-  u8 *pool_name;
-  struct rte_mempool *mp_priv;
-
-  data = vec_elt_at_index (dcm->data, numa);
-
-  if (data->session_priv)
-    return NULL;
-
-  pool_name = format (0, "session_priv_pool_numa%u%c", numa, 0);
-
-  session_drv_size = rte_cryptodev_sym_get_private_session_size (dev->id);
-  mp_priv = rte_mempool_create ((char *) pool_name, DPDK_CRYPTO_NB_SESS_OBJS,
-			session_drv_size, 512, 0, NULL, NULL, NULL, NULL, numa, 0);
-  vec_free (pool_name);
-
-  if (!mp_priv)
-    return clib_error_return (0, "failed to create session priv mempool");
-
-  data->session_priv = mp_priv;
-
-  return NULL;
-}
-
 static inline struct rte_security_session *
 create_security_session (struct rte_crypto_sym_xform *xfs,
                    ipsec_sa_t *sa,
@@ -393,13 +365,11 @@ create_security_session (struct rte_crypto_sym_xform *xfs,
   mp = vec_elt_at_index (data->session_drv, res->drv_id);
   ASSERT (mp[0] != NULL);
 
-  crypto_create_session_priv_pool (res->numa, dcm->dev);
-
-  return rte_security_session_create(ctx, &sess_conf, mp[0], data->session_priv);
+  return rte_security_session_create(ctx, &sess_conf, mp[0]);
 }
 
 clib_error_t *
-create_sym_session (struct rte_cryptodev_sym_session **session,
+create_sym_session (void **session,
 		    u32 sa_idx,
 		    crypto_resource_t * res,
 		    crypto_worker_main_t * cwm, u8 is_outbound)
@@ -410,7 +380,7 @@ create_sym_session (struct rte_cryptodev_sym_session **session,
   struct rte_crypto_sym_xform cipher_xform = { 0 };
   struct rte_crypto_sym_xform auth_xform = { 0 };
   struct rte_crypto_sym_xform *xfs;
-  struct rte_cryptodev_sym_session **s;
+  void **s;
   clib_error_t *error = 0;
 
   sa = ipsec_sa_get (sa_idx);
@@ -442,7 +412,7 @@ create_sym_session (struct rte_cryptodev_sym_session **session,
   data = vec_elt_at_index (dcm->data, res->numa);
   clib_spinlock_lock_if_init (&data->lockp);
 if (dcm->lookaside_proto_offload) {
-    session[0] = (struct rte_cryptodev_sym_session *)
+    session[0] = (void *)
          create_security_session (xfs, sa, res, is_outbound);
     if (NULL == session[0])
          return clib_error_return (0, "failed to create security session");
@@ -456,9 +426,13 @@ if (dcm->lookaside_proto_offload) {
    */
   s = (void *) hash_get (data->session_by_sa_index, sa_idx);
 
+  struct rte_mempool **mp;
+  mp = vec_elt_at_index (data->session_drv, res->drv_id);
+  ASSERT (mp[0] != NULL);
+
   if (!s)
     {
-      session[0] = rte_cryptodev_sym_session_create (data->session_h);
+      session[0] = rte_cryptodev_sym_session_create (res->dev_id, xfs, data->session_h);
       if (!session[0])
 	{
 	  data->session_h_failed += 1;
@@ -469,20 +443,6 @@ if (dcm->lookaside_proto_offload) {
     }
   else
     session[0] = s[0];
-
-  struct rte_mempool **mp;
-  mp = vec_elt_at_index (data->session_drv, res->drv_id);
-  ASSERT (mp[0] != NULL);
-
-  i32 ret =
-    rte_cryptodev_sym_session_init (res->dev_id, session[0], xfs, mp[0]);
-  if (ret)
-    {
-      data->session_drv_failed[res->drv_id] += 1;
-      error = clib_error_return (0, "failed to init session for drv %u",
-				 res->drv_id);
-      goto done;
-    }
 }
 
   add_session_by_drv_and_sa_idx (session[0], data, res->drv_id, sa_idx);
@@ -499,35 +459,6 @@ static void __attribute__ ((unused)) clear_and_free_obj (void *obj)
   clib_memset (obj, 0, mp->elt_size);
 
   rte_mempool_put (mp, obj);
-}
-
-/* This is from rte_cryptodev_pmd.h */
-static inline void *
-get_session_private_data (const struct rte_cryptodev_sym_session *sess,
-			  uint8_t driver_id)
-{
-#if RTE_VERSION < RTE_VERSION_NUM(19, 2, 0, 0)
-  return sess->sess_private_data[driver_id];
-#else
-  if (unlikely (sess->nb_drivers <= driver_id))
-    return 0;
-
-  return sess->sess_data[driver_id].data;
-#endif
-}
-
-/* This is from rte_cryptodev_pmd.h */
-static inline void
-set_session_private_data (struct rte_cryptodev_sym_session *sess,
-			  uint8_t driver_id, void *private_data)
-{
-#if RTE_VERSION < RTE_VERSION_NUM(19, 2, 0, 0)
-  sess->sess_private_data[driver_id] = private_data;
-#else
-  if (unlikely (sess->nb_drivers <= driver_id))
-    return;
-  sess->sess_data[driver_id].data = private_data;
-#endif
 }
 
 static clib_error_t *
@@ -548,7 +479,7 @@ dpdk_crypto_session_disposal (crypto_session_disposal_t * v, u64 ts)
 
       vec_foreach_index (drv_id, dcm->drv)
 	{
-	  drv_session = get_session_private_data (s->session, drv_id);
+	  drv_session = CRYPTODEV_GET_SYM_SESS_PRIV(s->session);
 	  if (!drv_session)
 	    continue;
 
@@ -558,13 +489,11 @@ dpdk_crypto_session_disposal (crypto_session_disposal_t * v, u64 ts)
 	   *  ASSERT (!ret);
 	   */
 	  clear_and_free_obj (drv_session);
-
-	  set_session_private_data (s->session, drv_id, NULL);
 	}
 
       if (rte_mempool_from_obj(s->session))
 	{
-	  ret = rte_cryptodev_sym_session_free (s->session);
+	  ret = rte_cryptodev_sym_session_free (dcm->resource->dev_id ,s->session);
 	  ASSERT (!ret);
 	}
     }
@@ -583,7 +512,7 @@ add_del_sa_session (u32 sa_index, u8 is_add)
 {
   dpdk_crypto_main_t *dcm = &dpdk_crypto_main;
   crypto_data_t *data;
-  struct rte_cryptodev_sym_session *s;
+  void *s;
   uword *val;
   u32 drv_id;
 
@@ -597,7 +526,7 @@ add_del_sa_session (u32 sa_index, u8 is_add)
       val = hash_get (data->session_by_sa_index, sa_index);
       if (val)
         {
-          s = (struct rte_cryptodev_sym_session *) val[0];
+          s = (void *) val[0];
           vec_foreach_index (drv_id, dcm->drv)
             {
               val = (uword*) get_session_by_drv_and_sa_idx (data, drv_id, sa_index);
@@ -943,13 +872,16 @@ crypto_create_crypto_op_pool (vlib_main_t * vm, u8 numa)
 }
 
 static clib_error_t *
-crypto_create_session_h_pool (vlib_main_t * vm, u8 numa)
+crypto_create_session_h_pool (vlib_main_t * vm, crypto_dev_t * dev)
 {
   dpdk_crypto_main_t *dcm = &dpdk_crypto_main;
+  struct rte_mempool *mp;
+  u8 numa = dev->numa;
   crypto_data_t *data;
   u8 *pool_name;
-  struct rte_mempool *mp;
+  void *sec_ctx;
   u32 elt_size;
+  size_t sz;
 
   data = vec_elt_at_index (dcm->data, numa);
 
@@ -958,9 +890,13 @@ crypto_create_session_h_pool (vlib_main_t * vm, u8 numa)
 
   pool_name = format (0, "session_h_pool_numa%u%c", numa, 0);
 
+  elt_size = rte_cryptodev_sym_get_private_session_size (dev->id);
 
-  elt_size = rte_cryptodev_sym_get_header_session_size ();
-
+  /* Get security context of the crypto device */
+  sec_ctx = rte_cryptodev_get_sec_ctx(dev->id);
+  sz = rte_security_session_get_size(sec_ctx);
+  if (sz > elt_size)
+	elt_size = sz;
 #if RTE_VERSION < RTE_VERSION_NUM(19, 2, 0, 0)
   mp = rte_mempool_create ((char *) pool_name, DPDK_CRYPTO_NB_SESS_OBJS,
 			   elt_size, 512, 0, NULL, NULL, NULL, NULL, numa, 0);
@@ -984,11 +920,13 @@ static clib_error_t *
 crypto_create_session_drv_pool (vlib_main_t * vm, crypto_dev_t * dev)
 {
   dpdk_crypto_main_t *dcm = &dpdk_crypto_main;
-  crypto_data_t *data;
-  u8 *pool_name;
   struct rte_mempool *mp;
-  u32 elt_size;
+  crypto_data_t *data;
   u8 numa = dev->numa;
+  u8 *pool_name;
+  void *sec_ctx;
+  u32 elt_size;
+  size_t sz;
 
   data = vec_elt_at_index (dcm->data, numa);
 
@@ -1003,6 +941,12 @@ crypto_create_session_drv_pool (vlib_main_t * vm, crypto_dev_t * dev)
   pool_name = format (0, "session_drv%u_pool_numa%u%c", dev->drv_id, numa, 0);
 
   elt_size = rte_cryptodev_sym_get_private_session_size (dev->id);
+
+  /* Get security context of the crypto device */
+  sec_ctx = rte_cryptodev_get_sec_ctx(dev->id);
+  sz = rte_security_session_get_size(sec_ctx);
+  if (sz > elt_size)
+	elt_size = sz;
   mp =
     rte_mempool_create ((char *) pool_name, DPDK_CRYPTO_NB_SESS_OBJS,
 			elt_size, 512, 0, NULL, NULL, NULL, NULL, numa, 0);
@@ -1034,7 +978,7 @@ crypto_create_pools (vlib_main_t * vm)
       if (error)
 	return error;
 
-      error = crypto_create_session_h_pool (vm, dev->numa);
+      error = crypto_create_session_h_pool (vm, dev);
       if (error)
 	return error;
 

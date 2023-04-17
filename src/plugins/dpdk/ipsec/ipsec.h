@@ -25,6 +25,7 @@
 #include <rte_crypto.h>
 #include <rte_cryptodev.h>
 #include <rte_security.h>
+#include <cryptodev_pmd.h>
 
 #if CLIB_DEBUG > 0
 #define always_inline static inline
@@ -134,12 +135,12 @@ typedef struct
 typedef struct
 {
   u64 ts;
-  struct rte_cryptodev_sym_session *session;
+  void *session;
 } crypto_session_disposal_t;
 
 typedef struct
 {
-  struct rte_cryptodev_sym_session *session;
+  void *session;
   u64 dev_mask;
     CLIB_ALIGN_MARK (pad, 16);	/* align up to 16 bytes for 32bit builds */
 } crypto_session_by_drv_t;
@@ -182,7 +183,7 @@ static const u8 pad_data[] =
 
 void crypto_auto_placement (void);
 
-clib_error_t *create_sym_session (struct rte_cryptodev_sym_session **session,
+clib_error_t *create_sym_session (void **session,
 				  u32 sa_idx, crypto_resource_t * res,
 				  crypto_worker_main_t * cwm, u8 is_outbound);
 
@@ -216,7 +217,7 @@ crypto_op_get_priv (struct rte_crypto_op * op)
 
 
 static_always_inline void
-add_session_by_drv_and_sa_idx (struct rte_cryptodev_sym_session *session,
+add_session_by_drv_and_sa_idx (void *session,
 			       crypto_data_t * data, u32 drv_id, u32 sa_idx)
 {
   crypto_session_by_drv_t *sbd;
@@ -227,7 +228,7 @@ add_session_by_drv_and_sa_idx (struct rte_cryptodev_sym_session *session,
   sbd->session = session;
 }
 
-static_always_inline struct rte_cryptodev_sym_session *
+static_always_inline void *
 get_session_by_drv_and_sa_idx (crypto_data_t * data, u32 drv_id, u32 sa_idx)
 {
   crypto_session_by_drv_t *sess_by_sa;
@@ -239,14 +240,14 @@ get_session_by_drv_and_sa_idx (crypto_data_t * data, u32 drv_id, u32 sa_idx)
 }
 
 static_always_inline clib_error_t *
-crypto_get_session (struct rte_cryptodev_sym_session ** session,
+crypto_get_session (void ** session,
 		    u32 sa_idx,
 		    crypto_resource_t * res,
 		    crypto_worker_main_t * cwm, u8 is_outbound)
 {
   dpdk_crypto_main_t *dcm = &dpdk_crypto_main;
   crypto_data_t *data;
-  struct rte_cryptodev_sym_session *sess;
+  void *sess;
 
   data = vec_elt_at_index (dcm->data, res->numa);
   sess = get_session_by_drv_and_sa_idx (data, res->drv_id, sa_idx);

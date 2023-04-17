@@ -124,7 +124,7 @@ dpdk_esp_encrypt_inline (vlib_main_t * vm,
   crypto_resource_t *res = 0;
   ipsec_sa_t *sa0 = 0;
   crypto_alg_t *cipher_alg = 0, *auth_alg = 0;
-  struct rte_cryptodev_sym_session *session = 0;
+  void *session = 0;
   u32 ret, last_sa_index = ~0;
   u8 numa = rte_socket_id ();
   u8 is_aead = 0;
@@ -805,7 +805,7 @@ VLIB_NODE_FN (dpdk_esp_proto_encrypt_node) (vlib_main_t * vm,
              res = vec_elt_at_index (dcm->resource, res_idx);
 
              error = crypto_get_session (
-                             (struct rte_cryptodev_sym_session **)&session,
+                             (void **)&session,
                              sa_index0,
                              res,
                              cwm,
