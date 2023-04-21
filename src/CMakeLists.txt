@@ -91,8 +91,8 @@ set(CMAKE_C_COMPILER_TARGET ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu)
 ##############################################################################
 # build config
 ##############################################################################
-check_c_compiler_flag("-Wno-address-of-packed-member"
-		      compiler_flag_no_address_of_packed_member)
+#check_c_compiler_flag("-Wno-address-of-packed-member"
+#		      compiler_flag_no_address_of_packed_member)
 set(VPP_RUNTIME_DIR ${CMAKE_INSTALL_BINDIR} CACHE STRING "Relative runtime directory path")
 set(VPP_LIBRARY_DIR ${CMAKE_INSTALL_LIBDIR} CACHE STRING "Relative library directory path")
 
@@ -102,7 +102,7 @@ set(VPP_BINARY_DIR ${CMAKE_BINARY_DIR}/CMakeFiles)
 set(PYENV PYTHONPYCACHEPREFIX=${CMAKE_BINARY_DIR}/CMakeFiles/__pycache__)
 
 if (CMAKE_BUILD_TYPE)
-  add_compile_options(-g -Werror -Wall)
+  add_compile_options(-g -Wall)
 endif()
 
 if (compiler_flag_no_address_of_packed_member)
@@ -184,7 +184,7 @@ endif()
 ##############################################################################
 # install config
 ##############################################################################
-option(VPP_SET_RPATH "Set rpath for resulting binaries and libraries." ON)
+option(VPP_SET_RPATH "Set rpath for resulting binaries and libraries." OFF)
 if(VPP_SET_RPATH)
   set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/${VPP_LIBRARY_DIR}")
 endif()

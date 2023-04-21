@@ -133,12 +133,12 @@ dpdk_device_setup (dpdk_device_t * xd)
 		  format_dpdk_tx_offload_caps, dev_info.tx_offload_capa);
   dpdk_log_debug ("[%u] Configured TX offloads: %U", xd->port_id,
 		  format_dpdk_tx_offload_caps, txo);
-
+#if 0
   /* Enable flow director when flows exist */
   if (xd->supported_flow_actions &&
       (xd->flags & DPDK_DEVICE_FLAG_RX_FLOW_OFFLOAD) != 0)
     conf.fdir_conf.mode = RTE_FDIR_MODE_PERFECT;
-
+#endif
   /* finalize configuration */
   conf.rxmode.offloads = rxo;
   conf.txmode.offloads = txo;
@@ -486,8 +486,8 @@ dpdk_get_pci_device (const struct rte_eth_dev_info *info)
 {
   const struct rte_bus *bus;
 
-  bus = rte_bus_find_by_device (info->device);
-  if (bus && !strcmp (bus->name, "pci"))
+  bus = rte_dev_bus(info->device);
+  if (bus && !strcmp(rte_bus_name(bus), "pci"))
     return RTE_DEV_TO_PCI (info->device);
   else
     return NULL;
@@ -499,8 +499,8 @@ dpdk_get_vmbus_device (const struct rte_eth_dev_info *info)
 {
   const struct rte_bus *bus;
 
-  bus = rte_bus_find_by_device (info->device);
-  if (bus && !strcmp (bus->name, "vmbus"))
+  bus = rte_dev_bus(info->device);
+  if (bus && !strcmp (rte_bus_name(bus), "vmbus"))
     return container_of (info->device, struct rte_vmbus_device, device);
   else
     return NULL;

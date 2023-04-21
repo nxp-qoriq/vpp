@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2015 Cisco and/or its affiliates.
+ * Copyright 2019-2023 NXP
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at:
@@ -205,8 +206,8 @@ dpdk_find_startup_config (struct rte_eth_dev_info *di)
   if ((vmbus_dev = dpdk_get_vmbus_device (di)))
     {
       unformat_input_t input_vmbus;
-      unformat_init_string (&input_vmbus, di->device->name,
-			    strlen (di->device->name));
+      unformat_init_string (&input_vmbus, rte_dev_name(di->device),
+			    strlen (rte_dev_name(di->device)));
       if (unformat (&input_vmbus, "%U", unformat_vlib_vmbus_addr, &vmbus_addr))
 	p = mhash_get (&dm->conf->device_config_index_by_vmbus_addr,
 		       &vmbus_addr);
@@ -971,6 +972,32 @@ dpdk_log_read_ready (clib_file_t * uf)
   return 0;
 }
 
+static void
+dpdk_unregister_callbacks (vlib_main_t * vm)
+{
+  vlib_buffer_set_alloc_free_callback (vm, 0, 0);
+}
+
+static clib_error_t *
+dpdk_register_callbacks (vlib_main_t * vm)
+{
+  if (vlib_buffer_set_alloc_free_callback (vm, dpdk_alloc_callback,
+                                          dpdk_free_callback))
+    goto err0;
+  return 0;
+err0:
+  vlib_buffer_set_alloc_free_callback (vm, 0, 0);
+  return clib_error_return (0, "failed to register callback");
+}
+
+static clib_error_t *
+dpdk_termination_case_enable (vlib_main_t * vm)
+{
+  dpdk_unregister_callbacks (vm);
+  dpdk_register_callbacks (vm);
+  return 0;
+}
+
 static clib_error_t *
 dpdk_config (vlib_main_t * vm, unformat_input_t * input)
 {
@@ -989,7 +1016,7 @@ dpdk_config (vlib_main_t * vm, unformat_input_t * input)
   int eal_no_hugetlb = 0;
   u8 no_pci = 0;
   u8 no_vmbus = 0;
-  u8 no_dsa = 0;
+//  u8 no_dsa = 0;
   u8 file_prefix = 0;
   u8 *socket_mem = 0;
   u8 *huge_dir_path = 0;
@@ -1100,8 +1127,8 @@ dpdk_config (vlib_main_t * vm, unformat_input_t * input)
 	  tmp = format (0, "--no-pci%c", 0);
 	  vec_add1 (conf->eal_init_args, tmp);
 	}
-      else if (unformat (input, "no-dsa"))
-	no_dsa = 1;
+//      else if (unformat (input, "no-dsa"))
+//	no_dsa = 1;
       else if (unformat (input, "blacklist %U", unformat_vlib_vmbus_addr,
 			 &vmbus_addr))
 	{
@@ -1293,7 +1320,7 @@ dpdk_config (vlib_main_t * vm, unformat_input_t * input)
 	  fcntl (log_fds[1], F_SETFL, O_NONBLOCK) == 0)
 	{
 	  FILE *f = fdopen (log_fds[1], "a");
-	  if (f && rte_openlog_stream (f) == 0)
+	  if (f && rte_openlog_stream (stdout) == 0)
 	    {
 	      clib_file_t t = { 0 };
 	      t.read_function = dpdk_log_read_ready;
@@ -1311,6 +1338,7 @@ dpdk_config (vlib_main_t * vm, unformat_input_t * input)
 
   vm = vlib_get_main ();
 
+#if 0
   if (no_dsa)
     {
       struct rte_bus *bus;
@@ -1318,6 +1346,7 @@ dpdk_config (vlib_main_t * vm, unformat_input_t * input)
       if (bus)
 	rte_bus_unregister (bus);
     }
+#endif
   /* make copy of args as rte_eal_init tends to mess up with arg array */
   for (i = 1; i < vec_len (conf->eal_init_args); i++)
     conf->eal_init_args_str = format (conf->eal_init_args_str, "%s ",
@@ -1349,6 +1378,9 @@ dpdk_config (vlib_main_t * vm, unformat_input_t * input)
   /* main thread 1st */
   if ((error = dpdk_buffer_pools_create (vm)))
     return error;
+
+  /* to enable termination cases */
+  dpdk_termination_case_enable(vm);
 
   return 0;
 }
@@ -1449,7 +1481,7 @@ dpdk_process (vlib_main_t * vm, vlib_node_runtime_t * rt, vlib_frame_t * f)
 
   if (error)
     clib_error_report (error);
-
+#if 0
   if (dpdk_cryptodev_init)
     {
       error = dpdk_cryptodev_init (vm);
@@ -1460,7 +1492,7 @@ dpdk_process (vlib_main_t * vm, vlib_node_runtime_t * rt, vlib_frame_t * f)
 	  clib_error_free (error);
 	}
     }
-
+#endif
   tm->worker_thread_release = 1;
 
   f64 now = vlib_time_now (vm);
@@ -1526,6 +1558,7 @@ dpdk_init (vlib_main_t * vm)
   dm->conf = &dpdk_config_main;
 
   vec_add1 (dm->conf->eal_init_args, (u8 *) "vnet");
+  vec_add1 (dm->conf->eal_init_args, (u8 *) "--huge-unlink");
 
   dm->stat_poll_interval = DPDK_STATS_POLL_INTERVAL;
   dm->link_state_poll_interval = DPDK_LINK_POLL_INTERVAL;

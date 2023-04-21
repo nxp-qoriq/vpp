@@ -1,5 +1,7 @@
 /*
  * Copyright (c) 2017-2019 Cisco and/or its affiliates.
+ * Copyright 2019-2023 NXP
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at:
@@ -22,6 +24,7 @@
 #include <rte_cryptodev.h>
 #include <rte_vfio.h>
 #include <rte_version.h>
+#include <rte_mbuf_pool_ops.h>
 
 #include <vlib/vlib.h>
 #include <dpdk/buffer.h>
@@ -35,15 +38,90 @@ struct rte_mempool **dpdk_mempool_by_buffer_pool_index = 0;
 struct rte_mempool **dpdk_no_cache_mempool_by_buffer_pool_index = 0;
 struct rte_mbuf *dpdk_mbuf_template_by_pool_index = 0;
 
+struct vlib_args {
+	vlib_main_t *vm;
+	vlib_buffer_pool_t *bp;
+};
+
+u32
+dpdk_alloc_callback (vlib_main_t *vm, u8 buffer_pool_index, u32 *buffers,
+                    u32 n_buffers)
+{
+       struct rte_mempool *mp;
+       struct rte_mbuf *mb;
+       vlib_buffer_t *b;
+       u32 i, mbuf_count;
+
+       vlib_buffer_pool_t *bp = vlib_get_buffer_pool (vm, buffer_pool_index);
+       mp = dpdk_mempool_by_buffer_pool_index[bp->index];
+
+       mbuf_count = rte_mempool_avail_count (mp);
+       if (n_buffers <= mbuf_count)
+       {
+               for (i = 0; i < n_buffers; i++)
+               {
+                       mb = rte_pktmbuf_alloc(mp);
+                       if (!mb) {
+                               clib_error ("mbuf failed");
+                               return 0;
+                       }
+               b = vlib_buffer_from_rte_mbuf (mb);
+               u32 bi = vlib_get_buffer_index(vm, b);
+               buffers[i] = bi;
+               }
+               return n_buffers;
+       }
+       else
+               return 0;
+}
+
+u32
+dpdk_free_callback (vlib_main_t *vm, u8 buffer_pool_index, u32 *buffers,
+                    u32 n_buffers)
+{
+       struct rte_mbuf *mb;
+       int i;
+
+       for (i = 0; i < n_buffers; i++)
+       {
+               vlib_buffer_t *b = vlib_get_buffer (vm, buffers[i]);
+               mb = rte_mbuf_from_vlib_buffer (b);
+               if (mb == NULL) {
+                       clib_warning ("No buffer to free\n");
+                       continue;
+               }
+               rte_pktmbuf_free(mb);
+       }
+       return 0;
+}
+
+void
+rewrite_vlib_bufs(struct rte_mempool *mp,
+		__attribute__((unused)) void *opaque_arg,
+		void *_m,
+		__attribute__((unused)) unsigned i) {
+  struct vlib_args *args = opaque_arg;
+  struct rte_mbuf *mb = (struct rte_mbuf *)_m;
+  void *b = (void *)vlib_buffer_from_rte_mbuf(mb);
+  u32 bi = vlib_get_buffer_index(args->vm, b);
+  struct rte_mempool_objhdr *hdr;
+
+  hdr = (struct rte_mempool_objhdr *) RTE_PTR_SUB (mb, sizeof (*hdr));
+     args->bp->buffers[i] = bi;
+}
+
 clib_error_t *
 dpdk_buffer_pool_init (vlib_main_t * vm, vlib_buffer_pool_t * bp)
 {
   uword buffer_mem_start = vm->buffer_main->buffer_mem_start;
-  struct rte_mempool *mp, *nmp;
+  struct rte_mempool *mp;
   struct rte_pktmbuf_pool_private priv;
   enum rte_iova_mode iova_mode;
   u32 i;
   u8 *name = 0;
+  const char *mp_ops_name = rte_mbuf_best_mempool_ops();
+  int ret;
+  struct vlib_args args;
 
   u32 elt_size =
     sizeof (struct rte_mbuf) + sizeof (vlib_buffer_t) + bp->data_size;
@@ -67,7 +145,7 @@ dpdk_buffer_pool_init (vlib_main_t * vm, vlib_buffer_pool_t * bp)
 				bp->index);
     }
   vec_reset_length (name);
-
+#if 0
   /* non-cached mempool */
   name = format (name, "vpp pool %u (no cache)%c", bp->index, 0);
   nmp = rte_mempool_create_empty ((char *) name, bp->n_buffers,
@@ -81,15 +159,17 @@ dpdk_buffer_pool_init (vlib_main_t * vm, vlib_buffer_pool_t * bp)
 				"failed to create non-cache mempool for numa nude %u",
 				bp->index);
     }
+#endif
   vec_free (name);
 
   dpdk_mempool_by_buffer_pool_index[bp->index] = mp;
-  dpdk_no_cache_mempool_by_buffer_pool_index[bp->index] = nmp;
+  /* Not using no_cache_mempool for now */
+  dpdk_no_cache_mempool_by_buffer_pool_index[bp->index] = NULL;
 
-  mp->pool_id = nmp->pool_id = bp->index;
+  mp->pool_id = bp->index;
 
-  rte_mempool_set_ops_byname (mp, "vpp", NULL);
-  rte_mempool_set_ops_byname (nmp, "vpp-no-cache", NULL);
+  /* Use platform specific mempool ops */
+  rte_mempool_set_ops_byname (mp, mp_ops_name, NULL);
 
   /* Call the mempool priv initializer */
   memset (&priv, 0, sizeof (priv));
@@ -97,10 +177,49 @@ dpdk_buffer_pool_init (vlib_main_t * vm, vlib_buffer_pool_t * bp)
     vlib_buffer_get_default_data_size (vm);
   priv.mbuf_priv_size = VLIB_BUFFER_HDR_SIZE;
   rte_pktmbuf_pool_init (mp, &priv);
-  rte_pktmbuf_pool_init (nmp, &priv);
 
   iova_mode = rte_eal_iova_mode ();
 
+  /* map DMA pages if at least one physical device exists */
+  if (rte_eth_dev_count_avail ())
+    {
+      uword i;
+      size_t page_sz;
+      vlib_physmem_map_t *pm;
+      int do_vfio_map = 1;
+
+      pm = vlib_physmem_get_map (vm, bp->physmem_map_index);
+      page_sz = 1ULL << pm->log2_page_size;
+
+      for (i = 0; i < pm->n_pages; i++)
+          {
+            char *va = ((char *) pm->base) + i * page_sz;
+            uword pa = (iova_mode == RTE_IOVA_VA) ?
+            pointer_to_uword (va) : pm->page_table[i];
+
+                ret = rte_mempool_populate_iova (mp, va, pa, page_sz, 0, 0);
+                if (ret < 0)
+                {
+                        rte_mempool_free (mp);
+                        return clib_error_return (0, "failed to populate %d", ret);
+                }
+           if (do_vfio_map &&
+#if RTE_VERSION < RTE_VERSION_NUM(19, 11, 0, 0)
+              rte_vfio_dma_map (pointer_to_uword (va), pa, page_sz))
+#else
+              rte_vfio_container_dma_map (RTE_VFIO_DEFAULT_CONTAINER_FD,
+                                          pointer_to_uword (va), pa, page_sz))
+#endif
+            do_vfio_map = 0;
+          }
+   }
+
+  /* Fix the mempool hdr mismatch between DPDK and vlib */
+  args.vm = vm;
+  args.bp = bp;
+  rte_mempool_obj_iter (mp, rewrite_vlib_bufs, &args);
+
+#if 0
   /* populate mempool object buffer header */
   for (i = 0; i < bp->n_buffers; i++)
     {
@@ -119,7 +238,7 @@ dpdk_buffer_pool_init (vlib_main_t * vm, vlib_buffer_pool_t * bp)
 #if RTE_VERSION >= RTE_VERSION_NUM(22, 3, 0, 0)
   mp->flags &= ~RTE_MEMPOOL_F_NON_IO;
 #endif
-
+#endif
   /* call the object initializers */
   rte_mempool_obj_iter (mp, rte_pktmbuf_init, 0);
 
@@ -137,7 +256,7 @@ dpdk_buffer_pool_init (vlib_main_t * vm, vlib_buffer_pool_t * bp)
       b = vlib_buffer_ptr_from_index (buffer_mem_start, bp->buffers[i], 0);
       vlib_buffer_copy_template (b, &bp->buffer_template);
     }
-
+#if 0
   /* map DMA pages if at least one physical device exists */
   if (rte_eth_dev_count_avail () || rte_cryptodev_count ())
     {
@@ -177,7 +296,7 @@ dpdk_buffer_pool_init (vlib_main_t * vm, vlib_buffer_pool_t * bp)
 	  mp->nb_mem_chunks++;
 	}
     }
-
+#endif
   return 0;
 }
 
