@@ -1328,6 +1328,8 @@ dpdk_config (vlib_main_t * vm, unformat_input_t * input)
 	      t.description = format (0, "DPDK logging pipe");
 	      clib_file_add (&file_main, &t);
 	    }
+	  if(f)
+	      fclose(f);
 	}
       else
 	{
