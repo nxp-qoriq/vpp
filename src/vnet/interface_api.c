@@ -384,7 +384,12 @@ vl_api_sw_interface_dump_t_handler (vl_api_sw_interface_dump_t * mp)
       vec_add1 (filter, 0);	/* Ensure it's a C string for strcasecmp() */
     }
 
+  #if __GNUC__ < 13
   char *strcasestr (char *, char *);	/* lnx hdr file botch */
+  #else
+  char *strcasestr (const char *, const char *);	/* lnx hdr file botch */
+  #endif
+
   /* *INDENT-OFF* */
   pool_foreach (swif, im->sw_interfaces)
    {
