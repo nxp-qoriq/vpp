@@ -24,6 +24,7 @@
 #include <dpdk/buffer.h>
 #include <dpdk/device/dpdk.h>
 #include <dpdk/device/dpdk_priv.h>
+#undef always_inline
 #include <rte_bus_vdev.h>
 #include <rte_cryptodev.h>
 #include <rte_crypto_sym.h>
